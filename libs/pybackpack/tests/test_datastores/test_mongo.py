@@ -67,7 +67,7 @@ def test_mongo_crud(mongo, books_dict):
         assert res.acknowledged
         assert res.inserted_id
 
-    # Delete one document by
+    # Delete one document by id
     res = col.delete_many({"id": 1})
     assert res.acknowledged
     assert res.deleted_count == 1

@@ -10,7 +10,6 @@ from redis.commands.search.field import (
 )
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
-
 from pydantic import BaseModel
 
 redis_client = redis.from_url(url=os.environ.get("REDIS_URL"))

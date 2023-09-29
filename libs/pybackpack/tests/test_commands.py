@@ -8,6 +8,8 @@ from pybackpack.commands import (
     PipeCommand,
 )
 
+# pylint: disable=missing-class-docstring,too-few-public-methods
+
 
 class AddCharCommand(Command):
     def __init__(self, char=None) -> None:
@@ -161,7 +163,7 @@ def test_pipe():
 
 
 def test_sequential():
-    # Simulate && in unix-like shell
+    # Simulate && in unix-like systems
     commands = [
         AddCharCommand("A"),
         AddCharCommand("B"),
@@ -172,7 +174,7 @@ def test_sequential():
     assert result.output == ["A", "B", "C"]
     assert result.succeeded is True
 
-    # Simulate && in unix-like shell with error
+    # Simulate && with error
     commands = [
         AddCharCommand("A"),
         ErrorCommand(raise_error=False),
@@ -183,7 +185,7 @@ def test_sequential():
     assert result.output == ["A", None]
     assert result.succeeded is False
 
-    # Simulate || in unix-like shell
+    # Simulate || in unix-like system
     commands = [
         AddCharCommand("A"),
         ErrorCommand(raise_error=False),
@@ -193,7 +195,7 @@ def test_sequential():
     result = seq.run()
     assert result.output == ["A"]
 
-    # Simulate || in unix-like shell with error early
+    # Simulate || with error early
     commands = [
         ErrorCommand(raise_error=False),
         ErrorCommand(raise_error=False),
@@ -205,7 +207,7 @@ def test_sequential():
     assert result.output == [None, None, "A"]
     assert result.succeeded is True
 
-    # Simulate || in unix-like shell without error
+    # Simulate || without error
     commands = [
         AddCharCommand("A"),
         AddCharCommand("B"),
@@ -230,7 +232,7 @@ def test_sequential():
     assert seq.commands[1].result.output == "A"
     assert seq.commands[2].result is None
 
-    # Simulate ; in unix-like shell
+    # Simulate ; in unix-like system
     commands = [
         AddCharCommand("A"),
         ErrorCommand(raise_error=False),
@@ -250,15 +252,15 @@ def test_sequential():
         False,
     ]
     assert result.output == ["A", None, "C", None, "B", None]
-    # Command which did not raised error, the succeded is False but there is no
-    # error.
+    # Command which did not raised error, the succeeded is False but there is
+    # no error.
     assert seq.commands[1].result.succeeded is False
     assert seq.commands[1].result.error is None
     assert isinstance(seq.commands[3].result.error, SystemError)
     assert seq.commands[5].result.succeeded is False
     assert seq.commands[5].result.error is None
 
-    # Simulate ; in unix-like shell with error when raise_error=True
+    # Simulate ; with error when raise_error=True
     commands = [
         AddCharCommand("A"),
         ErrorCommand(raise_error=False),
@@ -320,7 +322,8 @@ def test_parallel():
 
     # Combined using process info
     seq = ParallelCommand(
-        [ProcessInfoCommand(), ProcessInfoCommand(), ProcessInfoCommand()]
+        [ProcessInfoCommand(), ProcessInfoCommand(), ProcessInfoCommand()],
+        number_of_processes=3,
     )
     result = seq.run()
     assert result.succeeded is True

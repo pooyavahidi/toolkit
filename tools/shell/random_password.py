@@ -3,7 +3,7 @@ import sys
 import argparse
 
 sys.path.append("../../libs/pybackpack")
-from pybackpack.cryptography import SecretGenerator
+from pybackpack.cryptography.secrets import SecretGenerator
 
 
 if __name__ == "__main__":

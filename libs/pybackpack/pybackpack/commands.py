@@ -1,7 +1,7 @@
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional
 from multiprocessing import Pool, cpu_count
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -59,15 +59,15 @@ class Command(ABC):
             self.input_data = input_data
         try:
             self.result = self._run()
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception as ex:
             self.result = CommandResult(
                 output=None,
                 succeeded=False,
-                error=e,
-                error_message=str(e),
+                error=ex,
+                error_message=str(ex),
             )
             if self.raise_error:
-                raise e
+                raise ex
 
         return self.result
 
@@ -78,9 +78,8 @@ class Command(ABC):
 
 
 class PipeCommand(Command):
-    """
-    This is a Macro Command which runs the commands in sequence, similar to a
-    shell's pipe. The output of each command is provided as input to the next
+    """This is a Macro Command which runs the commands in sequence, similar to
+    a shell's pipe. The output of each command is provided as input to the next
     command in sequence. If any command fails, the pipeline stops and returns
     the result with success set to False. An error is raised if no commands
     list is provided.
@@ -187,7 +186,7 @@ class SequentialCommand(Command):
                 if result.succeeded and self.operator == "||":
                     break
 
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 if self.collect_outputs:
                     outputs.append(None)
 
