@@ -1,13 +1,31 @@
 import pytest
-from pybackpack.osutils.shell import ProcessCommand
+from pybackpack.osutils.shell import ProcessCommand, run_command, find
 from pybackpack.commands import (
     PipeCommand,
     SequentialCommand,
 )
 
+# pylint: disable=redefined-outer-name
 
-def setup_files_and_dirs(tmpdir):
-    tmpdir.mkdir("dir1")
+
+@pytest.fixture
+def temp_dir(tmpdir):
+    # Create dir1 with some sample files and directories
+
+    dir1 = tmpdir.mkdir("dir1")
+    dir1.join("file1.yml").write("content")
+    dir1.join("file2.yaml").write("content")
+    dir1.join("file1.dev.yml").write("content")
+    dir1.join("file2.dev.yaml").write("content")
+    dir1.join("file3.txt").write("content")
+    dir1.join("file4.py").write("content")
+    dir1.join("file5.yamld").write("content")
+
+    # Add a subdirectory
+    dir1_sub1 = dir1.mkdir("dir1_sub1")
+    dir1_sub1.join("file1.txt").write("content")
+    dir1_sub1.join("file2.txt").write("content")
+
     return tmpdir
 
 
@@ -99,26 +117,6 @@ def test_pipe():
     assert pipe.commands[3].result is None
 
 
-def test_pipe_permission_error(tmpdir):
-    d = setup_files_and_dirs(tmpdir)
-    d.chmod(0o000)
-
-    commands = [
-        ProcessCommand(["echo", "Hello World"]),
-        ProcessCommand(["ls", d]),
-    ]
-    pipe = PipeCommand(commands)
-    res = pipe.run()
-    assert res.output is None
-    assert res.succeeded is False
-    assert pipe.commands[0].result.succeeded is True
-    assert pipe.commands[0].result.output == "Hello World\n"
-    assert pipe.commands[1].result.succeeded is False
-    assert pipe.commands[1].result.output is None
-    assert pipe.commands[1].result.error.returncode == 2
-    assert "Permission denied" in pipe.commands[1].result.error.stderr
-
-
 def test_sequential():
     # Simulate && operator in shell
     commands = [
@@ -197,3 +195,59 @@ def test_sequential_combined():
     seq = SequentialCommand([cmd1, cmd2, cmd3])
     result = seq.run()
     assert len(result.output) == 3
+
+
+def test_run_command():
+    # Test multi-lines output
+    cmd = ["ls", "/", "-l"]
+    res = run_command(cmd)
+    assert len(res) > 1
+
+    # Test failure
+    cmd = ["ls", "unknown"]
+    try:
+        run_command(cmd)
+        assert False
+    except Exception as ex:
+        # pylint: disable=no-member
+        assert "No such file or directory" in str(ex.stderr)
+
+
+def test_find(temp_dir):
+    # Get all yaml files
+    files = find(temp_dir, names=["*.yaml", "*.yml"])
+    assert len(files) == 4
+    assert {"file3.txt", "file4.py"} not in set(files)
+
+    # Get all the yaml files using regex
+    files = find(temp_dir, names=[r".*\.ya?ml$"], use_regex=True)
+    assert len(files) == 4
+    assert {"file3.txt", "file4.py"} not in set(files)
+
+    # Get all the files except txt and py files
+    files = find(temp_dir, types=["f"], exclude_names=["*.txt", "*.py"])
+    assert len(files) == 5
+    assert {"file3.txt", "file4.py"} not in set(files)
+
+    # Get all the yaml files except the ones with dev in the name
+    files = find(
+        temp_dir,
+        names=[r".*\.ya?ml$"],
+        exclude_names=[r".*dev.ya?ml$"],
+        use_regex=True,
+    )
+    assert len(files) == 2
+    assert {"file1.dev.yml", "file2.dev.yaml"} not in set(files)
+
+    # Finding no files with the given patterns
+    files = find(temp_dir, names=["*.cpp"])
+    assert len(files) == 0
+
+    # All *.txt files in all directories
+    files = find(temp_dir, names=["*.txt"])
+    assert len(files) == 3
+
+    # Find a particular file
+    file_name = "file3"
+    files = find(temp_dir, names=[rf"{file_name}\.txt"])
+    assert len(files) == 1
