@@ -35,7 +35,7 @@ class RedisDataStore:
         self.prefix_delimiter = prefix_delimiter
         self.index_prefix = index_prefix
 
-    def _add_prefix(self, key: str, prefixes: List[str] = None) -> str:
+    def _apply_prefix(self, key: str, prefixes: List[str] = None) -> str:
         """Returns the key with the prefix.
         If any prefixes are given, they will be added to the key in the order.
         It will use the defined delimiter to join the prefixes and key.
@@ -61,7 +61,7 @@ class RedisDataStore:
     def get_str(self, key: str, decoding="utf-8") -> str:
         """Returns the value for the given key."""
 
-        key = self._add_prefix(key, prefixes=[self.root_prefix])
+        key = self._apply_prefix(key, prefixes=[self.root_prefix])
         res = redis_client.get(key)
 
         if res and decoding:
@@ -71,33 +71,33 @@ class RedisDataStore:
     def set_str(self, key: str, value: str) -> None:
         """Sets the value for the given key."""
 
-        key = self._add_prefix(key, prefixes=[self.root_prefix])
+        key = self._apply_prefix(key, prefixes=[self.root_prefix])
         redis_client.set(key, value)
 
     def delete(self, key: str) -> None:
         """Deletes the key-value pair for the given key."""
 
-        key = self._add_prefix(key, prefixes=[self.root_prefix])
+        key = self._apply_prefix(key, prefixes=[self.root_prefix])
         redis_client.delete(key)
 
     def set_json(self, key: str, value: dict, json_path="$") -> None:
         """Using JSON capability of Redis Stack.
         Sets the value for the given key at the given JSONPath."""
 
-        key = self._add_prefix(key, prefixes=[self.root_prefix])
+        key = self._apply_prefix(key, prefixes=[self.root_prefix])
         redis_client.json().set(key, json_path, value)
 
     def keys(self, pattern: str) -> List[str]:
         """Returns the keys for the given pattern."""
 
-        pattern = self._add_prefix(pattern, prefixes=[self.root_prefix])
+        pattern = self._apply_prefix(pattern, prefixes=[self.root_prefix])
         return redis_client.keys(pattern)
 
     def get_json(self, key: str, json_path="$") -> dict:
         """Using JSON capability of Redis Stack.
         Returns the value for the given key at the given JSONPath."""
 
-        key = self._add_prefix(key, prefixes=[self.root_prefix])
+        key = self._apply_prefix(key, prefixes=[self.root_prefix])
         res = redis_client.json().get(key, json_path)
 
         if res and len(res) == 1:
@@ -113,7 +113,7 @@ class RedisDataStore:
         """Using JSON capability of Redis Stack.
         Deletes the value for the given key at the given JSONPath."""
 
-        key = self._add_prefix(key, prefixes=[self.root_prefix])
+        key = self._apply_prefix(key, prefixes=[self.root_prefix])
         redis_client.json().delete(key, json_path)
 
     def _get_key_for_pydantic(
@@ -126,7 +126,7 @@ class RedisDataStore:
             schema = model.Config.schema_extra.get("persist_schema")
             if not schema:
                 raise ValueError("persist_schema is not set for the model")
-            return self._add_prefix(key, prefixes=[schema])
+            return self._apply_prefix(key, prefixes=[schema])
 
         return key
 
@@ -181,7 +181,7 @@ class RedisDataStore:
         """Returns the key for the given index name.
         It will use root_prefix and index_prefix as prefixes.
         """
-        return self._add_prefix(
+        return self._apply_prefix(
             index_name, prefixes=[self.root_prefix, self.index_prefix]
         )
 
@@ -251,7 +251,7 @@ class RedisDataStore:
         for i, prefix in enumerate(key_prefixes_to_index):
             # Add prefixes in this format:
             # root_prefix + delimiter + prefix + delimiter
-            key_prefixes_to_index[i] = self._add_prefix(
+            key_prefixes_to_index[i] = self._apply_prefix(
                 "", prefixes=[self.root_prefix, prefix]
             )
 
