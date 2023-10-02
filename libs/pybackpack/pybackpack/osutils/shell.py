@@ -42,10 +42,9 @@ class ProcessCommand(Command):
         input_data=None,
         env=None,
         inherit_env=True,
-        raise_error=False,
         **other_popen_kwargs,
     ):
-        super().__init__(input_data=input_data, raise_error=raise_error)
+        super().__init__(input_data=input_data)
 
         if inherit_env:
             # Use the current environment as the base
@@ -100,7 +99,15 @@ class ProcessCommand(Command):
             if isinstance(ex, FileNotFoundError):
                 self.failed_with_command_not_found = True
 
-            raise ex
+            return CommandResult(
+                output=None,
+                succeeded=False,
+                error=ex,
+                error_message=str(ex),
+            )
+
+    async def _async_run(self) -> CommandResult:
+        raise TypeError("ProcessCommand does not support async run")
 
 
 def run_command(cmd: List[str], **kwargs) -> List[str]:
@@ -177,9 +184,9 @@ def find(
 
     # Handle object names
     if names:
-        for n in names:
+        for name in names:
             cmd.extend(ast["name"])
-            cmd[-1] = cmd[-1].format(n)
+            cmd[-1] = cmd[-1].format(name)
             cmd.append(ast["or"])
         cmd.pop()  # remove the last '-o'
 

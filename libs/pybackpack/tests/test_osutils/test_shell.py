@@ -59,10 +59,9 @@ def test_shell_command():
     assert res.error.returncode == 2
     assert "No such file or directory" in res.error.stderr
 
-    # Test failed command with ignore_errors=False. It will raise an exception
-    cmd = ProcessCommand(["ls", "unknown"], raise_error=True)
-    with pytest.raises(Exception):
-        cmd.run()
+    # Test failed command. Command doesn't raise error but returns the failure
+    cmd = ProcessCommand(["ls", "unknown"])
+    res = cmd.run()
     assert cmd.result.succeeded is False
     assert cmd.result.error.returncode == 2
 
@@ -123,7 +122,7 @@ def test_sequential():
         ProcessCommand(["echo", "Hello"]),
         ProcessCommand(["echo", "World"]),
     ]
-    seq = SequentialCommand(commands)
+    seq = SequentialCommand(commands, collect_outputs=True)
     res = seq.run()
     assert {"Hello\n", "World\n"} == set(res.output)
 
@@ -135,9 +134,9 @@ def test_sequential():
     ]
     seq = SequentialCommand(commands)
     res = seq.run()
-    assert ["Hello\n", None] == res.output
+    assert res.output == [None]
     assert res.succeeded is False
-    # resul of the first command
+    # The first command was successful
     assert seq.commands[0].result.metadata.returncode == 0
     assert seq.commands[0].result.metadata.stdout == "Hello\n"
     # The command which failed
@@ -161,7 +160,7 @@ def test_sequential():
         ProcessCommand(["ls", "unknown"]),
         ProcessCommand(["echo", "World"]),
     ]
-    seq = SequentialCommand(commands, operator=None)
+    seq = SequentialCommand(commands, operator=None, collect_outputs=True)
     result = seq.run()
     assert ["Hello\n", None, "World\n"] == result.output
 
@@ -192,7 +191,7 @@ def test_sequential_combined():
     )
 
     # Run the commands in sequence
-    seq = SequentialCommand([cmd1, cmd2, cmd3])
+    seq = SequentialCommand([cmd1, cmd2, cmd3], collect_outputs=True)
     result = seq.run()
     assert len(result.output) == 3
 
