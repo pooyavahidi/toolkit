@@ -1,4 +1,5 @@
 import string
+import textwrap
 import secrets
 
 
@@ -63,9 +64,11 @@ class SecretGenerator:
 
             retry_counter += 1
             if retry_counter == self.max_retry:
-                raise ValueError(
-                    "Cannot generate secret under given conditions.\
-Change the parameters and try again."
+                raise SystemError(
+                    textwrap.dedent(
+                        """Cannot generate secret under given conditions.
+                    Change the parameters and try again."""
+                    )
                 )
 
         return secret
