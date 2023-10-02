@@ -32,6 +32,7 @@ RUN pip install -U pip
 # Install development packages.
 RUN pip install --upgrade \
     pytest \
+    pytest-asyncio \
     pycodestyle
 
 # Install requirements.
