@@ -99,12 +99,7 @@ class ProcessCommand(Command):
             if isinstance(ex, FileNotFoundError):
                 self.failed_with_command_not_found = True
 
-            return CommandResult(
-                output=None,
-                succeeded=False,
-                error=ex,
-                error_message=str(ex),
-            )
+            return self._handle_error(ex)
 
     async def _async_run(self) -> CommandResult:
         raise TypeError("ProcessCommand does not support async run")

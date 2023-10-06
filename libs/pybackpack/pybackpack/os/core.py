@@ -4,7 +4,7 @@ from typing import List, Optional
 
 
 def get_files(
-    dir_path: str,
+    directory: str,
     names: Optional[List[str]] = None,
     exclude_names: Optional[List[str]] = None,
     recursive: bool = True,
@@ -12,7 +12,7 @@ def get_files(
     """Returns a list of files in the dir_path directory.
 
     Args:
-        dir_path: The directory to search for files.
+        directory: The directory to search for files.
         names: A list of regular expressions to match the filenames.
         by default, all files are included i.e. include_patterns=[".*"].
         exclude_names: A list of regular expressions to exclude the
@@ -29,9 +29,9 @@ def get_files(
 
     # Get files based on the value of recursive
     if recursive:
-        paths = list(Path(dir_path).rglob("*"))
+        paths = list(Path(directory).rglob("*"))
     else:
-        paths = list(Path(dir_path).glob("*"))
+        paths = list(Path(directory).glob("*"))
 
     for path in paths:
         # Skip directories or other non-files

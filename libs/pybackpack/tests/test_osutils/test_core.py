@@ -1,33 +1,36 @@
-from pybackpack.osutils.core import get_files
+import pytest
+from pybackpack.os.core import get_files
 
 
-# Using pytest tempdir fixture which creates a temporary directory and
-# automatically cleans it up after the test.
-def setup_files_and_dirs(tmpdir):
-    # Create dir1 with some sample files and directories
+# Using pytest temporary directory which automatically cleans it up
+@pytest.fixture(scope="module")
+def test_dir(tmp_path_factory):
+    # Create a temporary directory for this module
+    base_temp = tmp_path_factory.mktemp("test")
+    dir1 = base_temp / "dir1"
+    dir1.mkdir(parents=True, exist_ok=True)
 
-    dir1 = tmpdir.mkdir("dir1")
-    dir1.join("file1.yml").write("content")
-    dir1.join("file2.yaml").write("content")
-    dir1.join("file1.dev.yml").write("content")
-    dir1.join("file2.dev.yaml").write("content")
-    dir1.join("file3.txt").write("content")
-    dir1.join("file4.py").write("content")
-    dir1.join("file5.yamld").write("content")
+    (dir1 / "file1.yml").write_text("content")
+    (dir1 / "file2.yaml").write_text("content")
+    (dir1 / "file1.dev.yml").write_text("content")
+    (dir1 / "file2.dev.yaml").write_text("content")
+    (dir1 / "file3.txt").write_text("content")
+    (dir1 / "file4.py").write_text("content")
+    (dir1 / "file5.yamld").write_text("content")
 
     # Add a subdirectory
-    dir1_sub1 = dir1.mkdir("dir1_sub1")
-    dir1_sub1.join("file1.txt").write("content")
-    dir1_sub1.join("file2.txt").write("content")
+    dir1_sub1 = dir1 / "dir1_sub1"
+    dir1_sub1.mkdir(parents=True, exist_ok=True)
 
-    return tmpdir
+    (dir1_sub1 / "file1.txt").write_text("content")
+    (dir1_sub1 / "file2.txt").write_text("content")
+
+    return base_temp
 
 
-def test_get_files_all_files(tmpdir):
-    base_dir = setup_files_and_dirs(tmpdir)
-
+def test_get_files_all_files(test_dir):
     # Get all the files
-    files = get_files(base_dir)
+    files = get_files(test_dir)
     assert len(files) == 9
 
     # Get all files from an unknown directory
@@ -35,8 +38,8 @@ def test_get_files_all_files(tmpdir):
     assert len(files) == 0
 
 
-def test_get_files(tmpdir):
-    base_dir = setup_files_and_dirs(tmpdir).join("dir1")
+def test_get_files(test_dir):
+    base_dir = test_dir / "dir1"
 
     # Get all the yaml files
     files = get_files(base_dir, names=[r".*\.ya?ml$"])

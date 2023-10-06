@@ -1,5 +1,5 @@
 import pytest
-from pybackpack.osutils.shell import ProcessCommand, run_command, find
+from pybackpack.os.shell import ProcessCommand, run_command, find
 from pybackpack.commands import (
     PipeCommand,
     SequentialCommand,
@@ -8,25 +8,30 @@ from pybackpack.commands import (
 # pylint: disable=redefined-outer-name
 
 
-@pytest.fixture
-def temp_dir(tmpdir):
-    # Create dir1 with some sample files and directories
+# Using pytest temporary directory which automatically cleans it up
+@pytest.fixture(scope="module")
+def test_dir(tmp_path_factory):
+    # Create a temporary directory for this module
+    base_temp = tmp_path_factory.mktemp("test")
+    dir1 = base_temp / "dir1"
+    dir1.mkdir(parents=True, exist_ok=True)
 
-    dir1 = tmpdir.mkdir("dir1")
-    dir1.join("file1.yml").write("content")
-    dir1.join("file2.yaml").write("content")
-    dir1.join("file1.dev.yml").write("content")
-    dir1.join("file2.dev.yaml").write("content")
-    dir1.join("file3.txt").write("content")
-    dir1.join("file4.py").write("content")
-    dir1.join("file5.yamld").write("content")
+    (dir1 / "file1.yml").write_text("content")
+    (dir1 / "file2.yaml").write_text("content")
+    (dir1 / "file1.dev.yml").write_text("content")
+    (dir1 / "file2.dev.yaml").write_text("content")
+    (dir1 / "file3.txt").write_text("content")
+    (dir1 / "file4.py").write_text("content")
+    (dir1 / "file5.yamld").write_text("content")
 
     # Add a subdirectory
-    dir1_sub1 = dir1.mkdir("dir1_sub1")
-    dir1_sub1.join("file1.txt").write("content")
-    dir1_sub1.join("file2.txt").write("content")
+    dir1_sub1 = dir1 / "dir1_sub1"
+    dir1_sub1.mkdir(parents=True, exist_ok=True)
 
-    return tmpdir
+    (dir1_sub1 / "file1.txt").write_text("content")
+    (dir1_sub1 / "file2.txt").write_text("content")
+
+    return base_temp
 
 
 def test_shell_command():
@@ -212,25 +217,25 @@ def test_run_command():
         assert "No such file or directory" in str(ex.stderr)
 
 
-def test_find(temp_dir):
+def test_find(test_dir):
     # Get all yaml files
-    files = find(temp_dir, names=["*.yaml", "*.yml"])
+    files = find(test_dir, names=["*.yaml", "*.yml"])
     assert len(files) == 4
     assert {"file3.txt", "file4.py"} not in set(files)
 
     # Get all the yaml files using regex
-    files = find(temp_dir, names=[r".*\.ya?ml$"], use_regex=True)
+    files = find(test_dir, names=[r".*\.ya?ml$"], use_regex=True)
     assert len(files) == 4
     assert {"file3.txt", "file4.py"} not in set(files)
 
     # Get all the files except txt and py files
-    files = find(temp_dir, types=["f"], exclude_names=["*.txt", "*.py"])
+    files = find(test_dir, types=["f"], exclude_names=["*.txt", "*.py"])
     assert len(files) == 5
     assert {"file3.txt", "file4.py"} not in set(files)
 
     # Get all the yaml files except the ones with dev in the name
     files = find(
-        temp_dir,
+        test_dir,
         names=[r".*\.ya?ml$"],
         exclude_names=[r".*dev.ya?ml$"],
         use_regex=True,
@@ -239,14 +244,14 @@ def test_find(temp_dir):
     assert {"file1.dev.yml", "file2.dev.yaml"} not in set(files)
 
     # Finding no files with the given patterns
-    files = find(temp_dir, names=["*.cpp"])
+    files = find(test_dir, names=["*.cpp"])
     assert len(files) == 0
 
     # All *.txt files in all directories
-    files = find(temp_dir, names=["*.txt"])
+    files = find(test_dir, names=["*.txt"])
     assert len(files) == 3
 
     # Find a particular file
     file_name = "file3"
-    files = find(temp_dir, names=[rf"{file_name}\.txt"])
+    files = find(test_dir, names=[rf"{file_name}\.txt"])
     assert len(files) == 1
