@@ -100,7 +100,10 @@ def test_keys():
     keys = redis.keys("*key*")
     assert len(keys) == 2
     persist_schema = ParentModel.Config.schema_extra["persist_schema"]
-    assert keys[0].decode("utf-8") == f"{persist_schema}{delimiter}key2"
+    assert {
+        f"{persist_schema}{delimiter}key1",
+        f"{persist_schema}{delimiter}key2",
+    } == {key.decode("utf-8") for key in keys}
 
     # Clean up
     for key in redis.keys("*key*"):
