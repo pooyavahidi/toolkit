@@ -12,7 +12,8 @@ from pybackpack.commands import (
 
 
 @pytest.fixture
-def is_vscode_launch(request):
+def in_vscode_launch(request):
+    """Return True if running in VSCode's debugger."""
     return request.config.getoption("--vscode-launch", default=False)
 
 
@@ -522,7 +523,7 @@ def test_parallel():
     assert res.succeeded is True
 
 
-def test_parallel_with_pid(is_vscode_launch):
+def test_parallel_with_pid(in_vscode_launch):
     # Combined using process info
     seq = ParallelCommand(
         [ProcessInfoCommand(), ProcessInfoCommand(), ProcessInfoCommand()],
@@ -537,7 +538,7 @@ def test_parallel_with_pid(is_vscode_launch):
     # we check for the flag and assert the result accordingly.
     # If running outside the debugger, the process Ids will be different.
     # i.e. using `pytest` command in terminal.
-    if is_vscode_launch:
+    if in_vscode_launch:
         assert len(result.output) == 3
     else:
         assert result.output[0] != result.output[1] != result.output[2]
