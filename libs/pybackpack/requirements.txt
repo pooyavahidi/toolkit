@@ -1,3 +1,4 @@
 pydantic
 redis
 pymongo
+jinja2

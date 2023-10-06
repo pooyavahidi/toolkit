@@ -41,7 +41,8 @@
         // "-k",
         // "tests/test_osutils"
         // "tests/test_osutils/test_shell.py"
-        "tests/test_commands.py"
+        // "tests/test_commands.py"
+        "tests/test_text"
         // "tests/test_datastores"
       ],
       "console": "integratedTerminal",
