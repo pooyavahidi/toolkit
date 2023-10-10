@@ -7,9 +7,6 @@ services:
       args:
         BASE_IMAGE: "${DOCKER_LOCAL_REGISTRY}/development"
     image: ${DOCKER_LOCAL_REGISTRY}/vscode-pybackpack
-    environment:
-      REDIS_URL: ${REDIS_URL}
-      MONGODB_URL: ${MONGODB_URL}
     volumes:
       # Mount from the root to access .git in the vscode running in the container.
       - ../../..:/workspace:cached
