@@ -74,9 +74,11 @@ def test_shell_command():
     cmd = ProcessCommand(["unknown"])
     res = cmd.run()
     assert res.output is None
+    assert res.succeeded is False
     assert res.error.errno == 2
     assert cmd.failed_with_command_not_found is True
     assert "No such file or directory" in res.error.strerror
+    assert "No such file or directory" in res.error_message
 
     # Multiline output
     cmd = ProcessCommand(["ls", "/", "-l"])
