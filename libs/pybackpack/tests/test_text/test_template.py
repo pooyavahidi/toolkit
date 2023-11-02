@@ -62,3 +62,7 @@ def test_template_variables():
     # Test finding variables from a template
     template = Template("foo {{ var1 }}")
     assert template.find_variables() == {"var1"}
+
+    # Test finding variables from a template with a default value
+    template = Template("foo {{ var1 | default('baz') }}")
+    assert template.find_variables() == {"var1"}
