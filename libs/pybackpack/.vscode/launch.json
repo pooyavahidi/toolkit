@@ -38,10 +38,11 @@
       "args": [
         "--vscode-launch", // Custom flag to indicate that we are launching from VSCode
         // "--log-cli-level=INFO",
+        "-s",
         // "-k",
         // "tests/test_os"
-        "tests/test_os/test_shell.py"
-        // "tests/test_commands.py"
+        // "tests/test_os/test_shell.py"
+        "tests/test_commands.py"
         // "tests/test_text"
         // "tests/test_datastores"
       ],

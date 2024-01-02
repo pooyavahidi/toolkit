@@ -129,7 +129,7 @@ def test_sequential():
         ProcessCommand(["echo", "Hello"]),
         ProcessCommand(["echo", "World"]),
     ]
-    seq = SequentialCommand(commands, collect_outputs=True)
+    seq = SequentialCommand(commands, collect_results=True)
     res = seq.run()
     assert {"Hello\n", "World\n"} == set(res.output)
 
@@ -167,7 +167,7 @@ def test_sequential():
         ProcessCommand(["ls", "unknown"]),
         ProcessCommand(["echo", "World"]),
     ]
-    seq = SequentialCommand(commands, operator=None, collect_outputs=True)
+    seq = SequentialCommand(commands, operator=None, collect_results=True)
     result = seq.run()
     assert ["Hello\n", None, "World\n"] == result.output
 
@@ -198,7 +198,7 @@ def test_sequential_combined():
     )
 
     # Run the commands in sequence
-    seq = SequentialCommand([cmd1, cmd2, cmd3], collect_outputs=True)
+    seq = SequentialCommand([cmd1, cmd2, cmd3], collect_results=True)
     result = seq.run()
     assert len(result.output) == 3
 

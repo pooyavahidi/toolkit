@@ -3,9 +3,11 @@ import pytest
 from pybackpack.commands import (
     Command,
     CommandResult,
-    SequentialCommand,
-    ParallelCommand,
     PipeCommand,
+    SequentialCommand,
+    MultiProcessCommand,
+    run_command,
+    async_run_command,
 )
 
 # pylint: disable=missing-class-docstring,too-few-public-methods
@@ -19,25 +21,23 @@ def in_vscode_launch(request):
 
 class AddCharCommand(Command):
     def __init__(self, char=None) -> None:
-        super().__init__()
         self.char = char
 
-    def _run(self):
-        if not self.input_data:
-            self.input_data = ""
-        return CommandResult(f"{self.input_data}{self.char}")
+    def run(self, input_data=None):
+        if not input_data:
+            input_data = ""
+        return CommandResult(f"{input_data}{self.char}")
 
-    async def _async_run(self) -> CommandResult:
-        return self._run()
+    async def async_run(self, input_data=None) -> CommandResult:
+        return self.run(input_data)
 
 
 class ErrorCommand(Command):
     def __init__(self, raise_error=False) -> None:
-        super().__init__()
         self.error_message = "Error from ErrorCommand"
         self.raise_error = raise_error
 
-    def _run(self):
+    def run(self, input_data=None):
         if self.raise_error:
             raise SystemError(self.error_message)
 
@@ -47,84 +47,81 @@ class ErrorCommand(Command):
             error_message=self.error_message,
         )
 
-    async def _async_run(self) -> CommandResult:
-        return self._run()
+    async def async_run(self, input_data=None) -> CommandResult:
+        return self.run()
 
 
 class ProcessInfoCommand(Command):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def _run(self):
+    def run(self, input_data=None):
         return CommandResult(output=os.getpid())
 
-    async def _async_run(self) -> CommandResult:
-        return self._run()
+    async def async_run(self, input_data=None) -> CommandResult:
+        return self.run()
 
 
 def test_single_command():
     cmd = AddCharCommand("A")
-    result = cmd.run()
-    assert result.output == "A"
-    assert result.succeeded is True
+    res = run_command(cmd)
+    assert res.output == "A"
+    assert res.succeeded is True
 
     # Command with error
     cmd = ErrorCommand(raise_error=True)
-    res = cmd.run()
+    res = run_command(cmd)
     assert res.succeeded is False
     assert res.output is None
-    assert isinstance(cmd.result.error, SystemError)
+    assert isinstance(res.error, SystemError)
     assert res.error_message == "Error from ErrorCommand"
 
     # Command with error which doesn't raise error
     cmd = ErrorCommand(raise_error=False)
-    result = cmd.run()
-    assert result.output is None
-    assert result.succeeded is False
-    assert result.error_message == "Error from ErrorCommand"
+    res = run_command(cmd)
+    assert res.output is None
+    assert res.succeeded is False
+    assert res.error_message == "Error from ErrorCommand"
 
     # Test always raising error command
     cmd = ErrorCommand(raise_error=True)
-    res = cmd.run()
-    assert cmd.result.succeeded is False
-    assert cmd.result.output is None
-    assert isinstance(cmd.result.error, SystemError)
+    res = run_command(cmd)
+    assert res.succeeded is False
+    assert res.output is None
+    assert isinstance(res.error, SystemError)
 
     # Pass None as input
     cmd = AddCharCommand("A")
-    result = cmd.run(None)
-    assert result.output == "A"
-    assert result.succeeded is True
+    res = run_command(cmd, input_data=None)
+    assert res.output == "A"
+    assert res.succeeded is True
 
     # Pass empty string as input
     cmd = AddCharCommand("A")
-    result = cmd.run("")
-    assert result.output == "A"
-    assert result.succeeded is True
+    res = run_command(cmd, input_data="")
+    assert res.output == "A"
+    assert res.succeeded is True
 
 
 @pytest.mark.asyncio
 async def test_single_command_async():
     # Command without error
     cmd = AddCharCommand(char="A")
-    result = await cmd.async_run()
-    assert result.output == "A"
-    assert result.succeeded is True
+    res = await async_run_command(cmd)
+    assert res.output == "A"
+    assert res.succeeded is True
 
     # Command which raises error
     cmd = ErrorCommand(raise_error=True)
-    res = await cmd.async_run()
+    res = await async_run_command(cmd)
     assert res.succeeded is False
     assert res.output is None
-    assert isinstance(cmd.result.error, SystemError)
+    assert isinstance(res.error, SystemError)
     assert res.error_message == "Error from ErrorCommand"
 
     # Command with error which doesn't raise error
     cmd = ErrorCommand(raise_error=False)
-    result = await cmd.async_run()
-    assert result.output is None
-    assert result.succeeded is False
-    assert result.error_message == "Error from ErrorCommand"
+    res = await async_run_command(cmd)
+    assert res.output is None
+    assert res.succeeded is False
+    assert res.error_message == "Error from ErrorCommand"
 
 
 def test_pipe():
@@ -134,9 +131,9 @@ def test_pipe():
         AddCharCommand("B"),
         AddCharCommand("C"),
     ]
-    pipe = PipeCommand(commands)
-    result = pipe.run()
-    assert result.output == "ABC"
+    pipe = PipeCommand(commands=commands)
+    res = run_command(pipe)
+    assert res.output == "ABC"
 
     # Test pipe with initial input to the pipe
     commands = [
@@ -145,12 +142,13 @@ def test_pipe():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = pipe.run("D")
-    assert result.output == "DABC"
-    assert pipe.commands[0].result.output == "DA"
-    assert pipe.commands[0].result.succeeded is True
-    assert pipe.commands[1].result.output == "DAB"
-    assert pipe.commands[2].result.output == "DABC"
+    res = run_command(pipe, input_data="D")
+    assert res.output == "DABC"
+    assert len(res.results) == 3
+    assert res.results[0].output == "DA"
+    assert res.results[0].succeeded is True
+    assert res.results[1].output == "DAB"
+    assert res.results[2].output == "DABC"
 
     # Test pipe with command with error which doesn't raise error
     commands = [
@@ -159,13 +157,13 @@ def test_pipe():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = pipe.run()
-    assert result.output is None
-    assert result.succeeded is False
-    assert result.error_message == "Error from ErrorCommand"
+    res = run_command(pipe)
+    assert res.output is None
+    assert res.succeeded is False
+    assert res.error_message == "Error from ErrorCommand"
     # The error is None as Command doesn't raise error
-    assert result.error is None
-    assert pipe.commands[0].result.output == "A"
+    assert res.error is None
+    assert res.results[0].output == "A"
 
     # Test pipe with command with error which raises error
     commands = [
@@ -174,10 +172,10 @@ def test_pipe():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = pipe.run()
-    assert result.succeeded is False
-    assert result.output is None
-    assert isinstance(result.error, SystemError)
+    res = run_command(pipe)
+    assert res.succeeded is False
+    assert res.output is None
+    assert isinstance(res.error, SystemError)
 
     # Test pipe with None commands
     with pytest.raises(ValueError):
@@ -186,6 +184,21 @@ def test_pipe():
     # Test pipe with empty commands
     with pytest.raises(ValueError):
         pipe = PipeCommand(commands=[])
+
+
+def test_pipe_collect_results():
+    # Test without collecting results
+    commands = [
+        AddCharCommand("A"),
+        ErrorCommand(raise_error=False),
+        AddCharCommand("C"),
+    ]
+    pipe = PipeCommand(commands, collect_results=False)
+    res = run_command(pipe)
+    assert res.output is None
+    assert res.succeeded is False
+    assert res.error_message == "Error from ErrorCommand"
+    assert res.results == []
 
 
 @pytest.mark.asyncio
@@ -197,9 +210,9 @@ async def test_pipe_async():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = await pipe.async_run()
-    assert result.succeeded is True
-    assert result.output == "ABC"
+    res = await async_run_command(pipe)
+    assert res.succeeded is True
+    assert res.output == "ABC"
 
     # Test pipe with initial input to the pipe
     commands = [
@@ -208,12 +221,12 @@ async def test_pipe_async():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = await pipe.async_run("D")
-    assert result.output == "DABC"
-    assert pipe.commands[0].result.output == "DA"
-    assert pipe.commands[0].result.succeeded is True
-    assert pipe.commands[1].result.output == "DAB"
-    assert pipe.commands[2].result.output == "DABC"
+    res = await async_run_command(pipe, input_data="D")
+    assert res.output == "DABC"
+    assert res.results[0].output == "DA"
+    assert res.results[0].succeeded is True
+    assert res.results[1].output == "DAB"
+    assert res.results[2].output == "DABC"
 
     # Test pipe with command with error which doesn't raise error
     commands = [
@@ -222,12 +235,12 @@ async def test_pipe_async():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = await pipe.async_run()
-    assert result.output is None
-    assert result.succeeded is False
-    assert result.error_message == "Error from ErrorCommand"
-    assert result.error is None
-    assert pipe.commands[0].result.output == "A"
+    res = await async_run_command(pipe)
+    assert res.output is None
+    assert res.succeeded is False
+    assert res.error_message == "Error from ErrorCommand"
+    assert res.error is None
+    assert res.results[0].output == "A"
 
     # Test pipe with command with error which raises error
     commands = [
@@ -236,10 +249,22 @@ async def test_pipe_async():
         AddCharCommand("C"),
     ]
     pipe = PipeCommand(commands)
-    result = await pipe.async_run()
-    assert result.succeeded is False
-    assert result.output is None
-    assert isinstance(result.error, SystemError)
+    res = await async_run_command(pipe)
+    assert res.succeeded is False
+    assert res.output is None
+    assert isinstance(res.error, SystemError)
+
+    # Test without collecting results
+    commands = [
+        AddCharCommand("A"),
+        ErrorCommand(raise_error=False),
+        AddCharCommand("C"),
+    ]
+    pipe = PipeCommand(commands, collect_results=False)
+    res = await async_run_command(pipe)
+    assert res.output is None
+    assert res.succeeded is False
+    assert res.error_message == "Error from ErrorCommand"
 
 
 def test_sequential_and_operator():
@@ -249,10 +274,15 @@ def test_sequential_and_operator():
         AddCharCommand("B"),
         AddCharCommand("C"),
     ]
-    seq = SequentialCommand(commands, collect_outputs=True)
-    result = seq.run()
-    assert result.output == ["A", "B", "C"]
-    assert result.succeeded is True
+    seq = SequentialCommand(commands)
+    res = run_command(seq)
+    assert res.succeeded is True
+    assert res.output == ["A", "B", "C"]
+    # It can also be achieved using `results` attribute as both are the same.
+    # `results` holds all the additional information about the command
+    # execution such as error, output, etc.
+    outputs = [r.output for r in res.results]
+    assert outputs == ["A", "B", "C"]
 
     # Simulate && with error
     commands = [
@@ -260,21 +290,21 @@ def test_sequential_and_operator():
         ErrorCommand(raise_error=False),
         AddCharCommand("C"),
     ]
-    seq = SequentialCommand(commands, collect_outputs=True)
-    result = seq.run()
-    assert result.output == ["A", None]
-    assert result.succeeded is False
+    seq = SequentialCommand(commands)
+    res = run_command(seq)
+    assert res.output == ["A", None]
+    assert res.succeeded is False
 
-    # Simulate && with error, not collecting outputs
+    # Simulate && with error
     commands = [
         AddCharCommand("A"),
         ErrorCommand(raise_error=False),
         AddCharCommand("C"),
     ]
     seq = SequentialCommand(commands)
-    result = seq.run()
-    assert result.output == [None]
-    assert result.succeeded is False
+    res = run_command(seq)
+    assert res.output == ["A", None]
+    assert res.succeeded is False
 
     # Test with no commands
     with pytest.raises(ValueError):
@@ -293,8 +323,8 @@ def test_sequential_or_operator():
         AddCharCommand("C"),
     ]
     seq = SequentialCommand(commands, operator="||")
-    result = seq.run()
-    assert result.output == ["A"]
+    res = run_command(seq)
+    assert res.output == ["A"]
 
     # Simulate || with error early
     commands = [
@@ -304,12 +334,12 @@ def test_sequential_or_operator():
         AddCharCommand("C"),
     ]
     seq = SequentialCommand(commands, operator="||")
-    result = seq.run()
-    assert result.output == ["A"]
-    assert result.succeeded is True
-    assert seq.commands[0].result.output is None
-    assert seq.commands[1].result.output is None
-    assert seq.commands[2].result.output == "A"
+    res = run_command(seq)
+    assert set(res.output) >= {"A"}
+    assert res.succeeded is True
+    assert res.results[0].output is None
+    assert isinstance(res.results[1].error, SystemError)
+    assert res.results[2].output == "A"
 
     # Simulate || without error
     commands = [
@@ -318,9 +348,9 @@ def test_sequential_or_operator():
         AddCharCommand("C"),
     ]
     seq = SequentialCommand(commands, operator="||")
-    result = seq.run()
-    assert result.output == ["A"]
-    assert result.succeeded is True
+    res = run_command(seq)
+    assert res.output == ["A"]
+    assert res.succeeded is True
 
     # Simulate || with collecting outputs
     commands = [
@@ -328,13 +358,13 @@ def test_sequential_or_operator():
         AddCharCommand("A"),
         AddCharCommand("C"),
     ]
-    seq = SequentialCommand(commands, operator="||", collect_outputs=True)
-    result = seq.run()
-    assert result.output == [None, "A"]
-    assert result.succeeded is True
-    assert seq.commands[0].result.output is None
-    assert seq.commands[1].result.output == "A"
-    assert seq.commands[2].result is None
+    seq = SequentialCommand(commands, operator="||")
+    res = run_command(seq)
+    assert res.output == [None, "A"]
+    assert res.succeeded is True
+    assert res.results[0].output is None
+    assert res.results[1].output == "A"
+    assert len(res.results) == 2
 
 
 def test_sequential_no_operator():
@@ -347,9 +377,9 @@ def test_sequential_no_operator():
         AddCharCommand("B"),
         ErrorCommand(raise_error=True),
     ]
-    seq = SequentialCommand(commands, operator=None, collect_outputs=True)
-    result = seq.run()
-    assert [cmd.result.succeeded for cmd in seq.commands] == [
+    seq = SequentialCommand(commands, operator=None)
+    res = run_command(seq)
+    assert [res.succeeded for res in res.results] == [
         True,
         False,
         True,
@@ -357,50 +387,46 @@ def test_sequential_no_operator():
         True,
         False,
     ]
-    assert result.output == ["A", None, "C", None, "B", None]
-    assert seq.commands[1].result.succeeded is False
-    assert seq.commands[1].result.error is None
-    assert isinstance(seq.commands[3].result.error, SystemError)
-    assert seq.commands[5].result.succeeded is False
-    assert isinstance(seq.commands[5].result.error, SystemError)
-
-    # Simulate ; with error when raise_error=True
-    commands = [
-        AddCharCommand("A"),
-        ErrorCommand(raise_error=False),
-        AddCharCommand("C"),
-        ErrorCommand(raise_error=True),
-        AddCharCommand("B"),
-        ErrorCommand(raise_error=True),
-    ]
-    seq = SequentialCommand(commands, operator=None, collect_outputs=True)
-    result = seq.run()
-    assert result.output == ["A", None, "C", None, "B", None]
+    assert res.output == ["A", None, "C", None, "B", None]
+    assert res.results[1].succeeded is False
+    assert res.results[1].error is None
+    assert isinstance(res.results[3].error, SystemError)
+    assert res.results[5].succeeded is False
+    assert isinstance(res.results[5].error, SystemError)
 
 
 def test_sequential_combined():
-    cmd1 = SequentialCommand(
-        [AddCharCommand("A"), AddCharCommand("B")], collect_outputs=True
-    )
-    cmd2 = SequentialCommand(
-        [AddCharCommand("C"), AddCharCommand("D")], collect_outputs=True
-    )
-    seq = SequentialCommand([cmd1, cmd2], collect_outputs=True)
-    result = seq.run()
-    assert result.output == [["A", "B"], ["C", "D"]]
-    assert result.succeeded is True
-    assert seq.commands[0].result.output == ["A", "B"]
-    assert seq.commands[1].commands[0].result.output == "C"
+    # (A && B) && (C && D) = A && B && C && D
+    seq1 = SequentialCommand([AddCharCommand("A"), AddCharCommand("B")])
+    seq2 = SequentialCommand([AddCharCommand("C"), AddCharCommand("D")])
+    seq = SequentialCommand([seq1, seq2])
+    res = run_command(seq)
+    assert res.output == [["A", "B"], ["C", "D"]]
+    assert res.succeeded is True
+    assert res.results[0].output == ["A", "B"]
+    # Directly accessing the output of the first command in seq2
+    assert res.results[1].results[0].output == "C"
+    # Directly access the outputs using the `output` attribute
+    assert res.output[1][0] == "C"
+
+    # (A && B) || (C && D)
+    seq1 = SequentialCommand([AddCharCommand("A"), AddCharCommand("B")])
+    seq2 = SequentialCommand([AddCharCommand("C"), AddCharCommand("D")])
+    seq = SequentialCommand([seq1, seq2], operator="||")
+    res = run_command(seq)
+    assert res.output == [["A", "B"]]
+    assert res.succeeded is True
+    assert res.results[0].output == ["A", "B"]
+    assert len(res.results) == 1
 
     # Combined using process info
     seq = SequentialCommand(
         [ProcessInfoCommand(), ProcessInfoCommand(), ProcessInfoCommand()],
-        collect_outputs=True,
     )
-    result = seq.run()
-    assert result.succeeded is True
+    res = run_command(seq)
+    assert res.succeeded is True
     # Process Ids should be identical since both are run in the same process
-    assert result.output[0] == result.output[1] == result.output[2]
+    assert res.output[0] == res.output[1] == res.output[2]
 
 
 @pytest.mark.asyncio
@@ -411,10 +437,10 @@ async def test_sequential_async():
         ErrorCommand(raise_error=False),
         AddCharCommand("C"),
     ]
-    seq = SequentialCommand(commands, collect_outputs=True)
-    result = await seq.async_run()
-    assert result.output == ["A", None]
-    assert result.succeeded is False
+    seq = SequentialCommand(commands)
+    res = await async_run_command(seq)
+    assert res.output == ["A", None]
+    assert res.succeeded is False
 
     # Simulate ; in unix-like system
     commands = [
@@ -425,9 +451,9 @@ async def test_sequential_async():
         AddCharCommand("B"),
         ErrorCommand(raise_error=True),
     ]
-    seq = SequentialCommand(commands, operator=None, collect_outputs=True)
-    result = await seq.async_run()
-    assert [cmd.result.succeeded for cmd in seq.commands] == [
+    seq = SequentialCommand(commands, operator=None)
+    res = await async_run_command(seq)
+    assert [res.succeeded for res in res.results] == [
         True,
         False,
         True,
@@ -435,52 +461,78 @@ async def test_sequential_async():
         True,
         False,
     ]
-    assert result.output == ["A", None, "C", None, "B", None]
-    assert seq.commands[1].result.succeeded is False
-    assert seq.commands[1].result.error is None
-    assert isinstance(seq.commands[3].result.error, SystemError)
-    assert seq.commands[5].result.succeeded is False
-    assert isinstance(seq.commands[5].result.error, SystemError)
+    assert res.output == ["A", None, "C", None, "B", None]
+    assert res.results[1].succeeded is False
+    assert res.results[1].error is None
+    assert isinstance(res.results[3].error, SystemError)
+    assert res.results[5].succeeded is False
+    assert isinstance(res.results[5].error, SystemError)
 
     # Test combined sequential commands with different operators
     # (A && B) || (C && D) = A and B
-    cmd1 = SequentialCommand(
-        [AddCharCommand("A"), AddCharCommand("B")], collect_outputs=True
-    )
-    cmd2 = SequentialCommand(
-        [AddCharCommand("C"), AddCharCommand("D")], collect_outputs=True
-    )
-    seq = SequentialCommand([cmd1, cmd2], collect_outputs=True, operator="||")
-    result = await seq.async_run()
-    assert result.succeeded is True
-    assert result.output == [["A", "B"]]
+    seq1 = SequentialCommand([AddCharCommand("A"), AddCharCommand("B")])
+    seq2 = SequentialCommand([AddCharCommand("C"), AddCharCommand("D")])
+    seq = SequentialCommand([seq1, seq2], operator="||")
+    res = await async_run_command(seq)
+    assert res.succeeded is True
+    assert res.output == [["A", "B"]]
 
     # Test combined sequential commands
     # (A && Err) || (C && D) = C and D
-    cmd1 = SequentialCommand(
-        [AddCharCommand("A"), ErrorCommand(raise_error=True)],
-        collect_outputs=True,
+    seq1 = SequentialCommand(
+        [AddCharCommand("A"), ErrorCommand(raise_error=True)]
     )
-    cmd2 = SequentialCommand(
-        [AddCharCommand("C"), AddCharCommand("D")], collect_outputs=True
-    )
-    seq = SequentialCommand([cmd1, cmd2], operator="||")
-    result = await seq.async_run()
-    assert result.succeeded is True
-    assert result.output == [["C", "D"]]
+    seq2 = SequentialCommand([AddCharCommand("C"), AddCharCommand("D")])
+    seq = SequentialCommand([seq1, seq2], operator="||")
+    res = await async_run_command(seq)
+    assert res.succeeded is True
+    assert res.output == [["A", None], ["C", "D"]]
+    # Last output
+    assert res.output[-1] == ["C", "D"]
+    # Last result
+    assert res.results[-1].output == ["C", "D"]
 
     # Test combined sequential commands
     # (Err || B) && (C && D) = B and C
-    cmd1 = SequentialCommand(
-        [ErrorCommand(raise_error=True), AddCharCommand("B")], operator="||"
+    seq1 = SequentialCommand(
+        [ErrorCommand(raise_error=True), AddCharCommand("B")],
+        operator="||",
     )
-    cmd2 = SequentialCommand(
-        [AddCharCommand("C"), AddCharCommand("D")], operator="||"
+    seq2 = SequentialCommand(
+        [AddCharCommand("C"), AddCharCommand("D")],
+        operator="||",
     )
-    seq = SequentialCommand([cmd1, cmd2], collect_outputs=True)
-    result = await seq.async_run()
-    assert result.succeeded is True
-    assert result.output == [["B"], ["C"]]
+    seq = SequentialCommand([seq1, seq2])
+    res = await async_run_command(seq)
+    assert res.succeeded is True
+    assert res.output == [[None, "B"], ["C"]]
+
+
+def test_sequential_collect_results():
+    seq1 = SequentialCommand(
+        [AddCharCommand("A"), ErrorCommand(raise_error=True)]
+    )
+    seq2 = SequentialCommand([AddCharCommand("C"), AddCharCommand("D")])
+    seq = SequentialCommand([seq1, seq2], operator="||", collect_results=False)
+    res = run_command(seq)
+    assert res.succeeded is True
+    assert res.output == []
+    assert res.results == []
+
+    # Partial collection of results
+    seq1 = SequentialCommand(
+        [AddCharCommand("A"), ErrorCommand(raise_error=True)]
+    )
+    seq2 = SequentialCommand(
+        [AddCharCommand("C"), AddCharCommand("D")], collect_results=False
+    )
+    seq = SequentialCommand([seq1, seq2], operator="||")
+    res = run_command(seq)
+    assert res.succeeded is True
+    assert res.output == [["A", None], []]
+    assert len(res.results) == 2
+    assert res.results[0].output == ["A", None]
+    assert res.results[1].output == []
 
 
 def test_parallel():
@@ -490,10 +542,11 @@ def test_parallel():
         AddCharCommand("B"),
         AddCharCommand("C"),
     ]
-    par = ParallelCommand(commands, collect_outputs=True)
-    result = par.run()
-    assert result.output == ["A", "B", "C"]
-    assert result.succeeded is True
+    par = MultiProcessCommand(commands)
+    res = run_command(par)
+    assert res.output == ["A", "B", "C"]
+    assert res.succeeded is True
+    assert par._results[0].output == "A"
 
     # Run Parallel commands with error, raise_error=False
     commands = [
@@ -504,34 +557,20 @@ def test_parallel():
         AddCharCommand("B"),
         ErrorCommand(raise_error=False),
     ]
-    par = ParallelCommand(commands, collect_outputs=True)
-    result = par.run()
-    assert result.succeeded is True
-    assert result.output == ["A", None, "C", None, "B", None]
-
-    # Run Parallel commands with error and raise_error=True
-    commands = [
-        AddCharCommand("A"),
-        ErrorCommand(raise_error=False),
-        AddCharCommand("C"),
-        ErrorCommand(raise_error=True),
-        AddCharCommand("B"),
-        ErrorCommand(raise_error=True),
-    ]
-    par = ParallelCommand(commands, collect_outputs=True)
-    res = par.run()
+    par = MultiProcessCommand(commands)
+    res = run_command(par)
     assert res.succeeded is True
+    assert res.output == ["A", None, "C", None, "B", None]
 
 
 def test_parallel_with_pid(in_vscode_launch):
     # Combined using process info
-    seq = ParallelCommand(
+    seq = MultiProcessCommand(
         [ProcessInfoCommand(), ProcessInfoCommand(), ProcessInfoCommand()],
-        number_of_processes=3,
-        collect_outputs=True,
+        pool_size=3,
     )
-    result = seq.run()
-    assert result.succeeded is True
+    res = run_command(seq)
+    assert res.succeeded is True
 
     # Process Ids are different since they are run in different processes.
     # If running in VSCode's debugger, the process Ids will be the same. So,
@@ -539,6 +578,6 @@ def test_parallel_with_pid(in_vscode_launch):
     # If running outside the debugger, the process Ids will be different.
     # i.e. using `pytest` command in terminal.
     if in_vscode_launch:
-        assert len(result.output) == 3
+        assert len(res.output) == 3
     else:
-        assert result.output[0] != result.output[1] != result.output[2]
+        assert res.output[0] != res.output[1] != res.output[2]

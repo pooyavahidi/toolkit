@@ -1,7 +1,8 @@
+from __future__ import annotations
 from typing import Any, List, Optional
 from multiprocessing import Pool, cpu_count
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -13,146 +14,122 @@ class CommandResult:
         succeeded: A boolean indicating whether the command was successful.
         error: The exception raised by the command if it failed.
         error_message: The error message if the command failed.
-        metadata: A dictionary containing any additional metadata.
+        metadata: Any additional data.
+        results: List of sub-commands results if applicable.
     """
 
-    output: Any
+    output: Any = None
     succeeded: bool = True
     error: Any = None
     error_message: str = None
     metadata: Any = None
+    results: List[CommandResult] = field(default_factory=list)
 
 
 class Command(ABC):
-    """
-    An abstract class for any executable command.
+    """An abstract class for any executable command.
 
     Provides a simple common interface for all classes which implement
     the `Command` pattern. It provides a `run` for synchronous execution and
     an `async_run` for asynchronous execution.
-
-    The `run` function doesn't raise any exceptions. Instead, it sets the
-    `result` attribute of the command object with the result of the command
-    and reutrns it. If the command fails, the `result` attribute is set with
-    the error and the `succeeded` attribute is set to False.
-
-    Attributes:
-        input_data: The input provided for the command.
-        result: The result after executing the command.
     """
 
-    def __init__(self, input_data: Optional[Any] = None):
-        self.input_data = input_data
-        self.result: Optional[CommandResult] = None
-
-    def _handle_error(self, error: Exception) -> CommandResult:
-        """Handles the error raised by the command.
-
-        Args:
-            error: The exception raised by the command.
-
-        Returns:
-            CommandResult: The result after handling the error.
-        """
-        return CommandResult(
-            output=None,
-            succeeded=False,
-            error=error,
-            error_message=str(error),
-        )
-
-    def _set_input(self, input_data: Any) -> None:
-        """Checks the input provided and if not None, replace the command
-        input with the new input.
-
-        Args:
-            input_data: The new input data.
-        """
-        if input_data is not None:
-            self.input_data = input_data
-
+    @abstractmethod
     def run(self, input_data: Optional[Any] = None) -> CommandResult:
         """Runs the command.
-
-        If `input_data` is provided, it sets the command input,
-        and then calls the _run method to execute.
 
         Args:
             input_data: The input for the command. Defaults to None.
 
         Returns:
-            CommandResult: The result after executing the command.
+            CommandResult: The result of executing the command.
         """
-        self._set_input(input_data)
-
-        try:
-            self.result = self._run()
-        except Exception as ex:
-            self.result = self._handle_error(ex)
-
-        return self.result
 
     @abstractmethod
-    def _run(self) -> CommandResult:
-        """Executes the command and returns a CommandResult."""
-        raise NotImplementedError
-
     async def async_run(
         self, input_data: Optional[Any] = None
     ) -> CommandResult:
         """Runs the command asynchronously.
 
-        If `input_data` is provided, it sets the command input,
-        and then calls the _async_run method to execute.
-
         Args:
             input_data: The input for the command. Defaults to None.
 
         Returns:
             CommandResult: The result after executing the command.
         """
-        self._set_input(input_data)
 
-        try:
-            self.result = await self._async_run()
-        except Exception as ex:
-            self.result = self._handle_error(ex)
 
-        return self.result
+def run_command(
+    command: Command, input_data: Optional[Any] = None
+) -> CommandResult:
+    """Runs a command synchronously and returns the result.
 
-    @abstractmethod
-    async def _async_run(self) -> CommandResult:
-        """Executes the command asynchronously and returns a CommandResult."""
-        raise NotImplementedError
+    Args:
+        command: A Command object to be executed.
+        input_data: The input for the command. Defaults to None.
+
+    Returns:
+        CommandResult: The result of executing the command.
+    """
+    try:
+        return command.run(input_data=input_data)
+    except Exception as ex:
+        return CommandResult(
+            output=None,
+            succeeded=False,
+            error=ex,
+            error_message=str(ex),
+        )
+
+
+async def async_run_command(
+    command: Command, input_data: Optional[Any] = None
+) -> CommandResult:
+    """Runs a command asynchronously and returns the result.
+
+    Args:
+        command: A Command object to be executed.
+        input_data: The input for the command. Defaults to None.
+    Returns:
+        CommandResult: The result of executing the command.
+    """
+    try:
+        return await command.async_run(input_data=input_data)
+    except Exception as ex:
+        return CommandResult(
+            output=None,
+            succeeded=False,
+            error=ex,
+            error_message=str(ex),
+        )
 
 
 class PipeCommand(Command):
     """This is a Macro Command which runs the commands in sequence, similar to
-    a shell's pipe. The output of each command is provided as input to the next
+    `Pipe` in Unix-like operating systems.
+    The output of each command is provided as input to the next
     command in sequence. If any command fails, the pipeline stops and returns
     the result with success set to False. An error is raised if no commands
     list is provided.
 
     Attributes:
-        commands (List[Command]): A list of Command objects to be executed in
-            a pipeline.
-        input_data: Initial input for the first command. Defaults to None.
+        commands: A list of Commands to be executed in the pipeline.
     """
 
     def __init__(
         self,
         commands: List[Command],
-        input_data: Any = None,
+        collect_results=True,
     ):
-        super().__init__(input_data=input_data)
-
         if not commands:
             raise ValueError("Commands list cannot be None or empty")
         self.commands = commands
         self._pipeline_failed = False
         self._last_result = None
+        self._collect_results = collect_results
+        self._results = []
 
-    def _evaluate_result(self, result: CommandResult) -> bool:
+    def _evaluate_execution(self, result: CommandResult) -> bool:
         """Evaluates the result of a command and returns a boolean indicating
         whether the process should continue or not.
 
@@ -164,52 +141,61 @@ class PipeCommand(Command):
         """
         self._last_result = result
 
+        if self._collect_results:
+            self._results.append(result)
+
         if not result.succeeded:
             self._pipeline_failed = True
             return False
 
         return True
 
-    def _final_result(self) -> CommandResult:
-        """Returns the final result of the pipeline.
+    def _create_final_result(self, result: CommandResult) -> CommandResult:
+        """Returns the final result of the pipeline. It returns the details of
+        the last command in the pipeline.
 
-        If the pipeline has failed, it returns the result of the last command
-        which failed as is. Otherwise, it creates a new CommandResult object
-        with the output of the last command and returns it.
+        Args:
+            result: The result of the last command in the sequence.
 
         Returns:
             CommandResult: The final result of the pipeline.
         """
-        if self._pipeline_failed:
-            return self._last_result
+        last_error = result.error
+        last_error_message = result.error_message
+        succeeded = result.succeeded
+        output = result.output
 
-        return CommandResult(output=self._last_result.output)
+        return CommandResult(
+            output=output,
+            succeeded=succeeded,
+            results=self._results,
+            error=last_error,
+            error_message=last_error_message,
+        )
 
-    def _last_output(self) -> Any:
-        """Returns the output of the last command in the pipeline.
-        If no result yet, it returns the command's input to the first command
-        in the pipeline.
-        """
-        if self._last_result:
-            return self._last_result.output
-
-        return self.input_data
-
-    def _run(self) -> CommandResult:
+    def run(self, input_data: Optional[Any] = None) -> CommandResult:
         for command in self.commands:
-            result = command.run(input_data=self._last_output())
-            if not self._evaluate_result(result):
+            if self._last_result:
+                input_data = self._last_result.output
+
+            result = run_command(command, input_data=input_data)
+            if not self._evaluate_execution(result):
                 break
 
-        return self._final_result()
+        return self._create_final_result(result)
 
-    async def _async_run(self) -> CommandResult:
+    async def async_run(
+        self, input_data: Optional[Any] = None
+    ) -> CommandResult:
         for command in self.commands:
-            result = await command.async_run(input_data=self._last_output())
-            if not self._evaluate_result(result):
+            if self._last_result:
+                input_data = self._last_result.output
+
+            result = await async_run_command(command, input_data=input_data)
+            if not self._evaluate_execution(result):
                 break
 
-        return self._final_result()
+        return self._create_final_result(result)
 
 
 class SequentialCommand(Command):
@@ -241,10 +227,8 @@ class SequentialCommand(Command):
         self,
         commands: List[Command],
         operator="&&",
-        collect_outputs=False,
+        collect_results=True,
     ):
-        super().__init__()
-
         if not commands:
             raise ValueError("Commands list cannot be None or empty")
         if operator not in ["&&", "||", None]:
@@ -252,10 +236,11 @@ class SequentialCommand(Command):
 
         self.commands = commands
         self.operator = operator
-        self.collect_outputs = collect_outputs
+        self._collect_results = collect_results
+        self._results = []
         self._outputs = []
 
-    def _evaluate_result(self, result: CommandResult) -> bool:
+    def _evaluate_execution(self, result: CommandResult) -> bool:
         """Evaluates the result of a command and returns a boolean indicating
         whether the process should continue or not.
 
@@ -265,7 +250,8 @@ class SequentialCommand(Command):
         Returns:
             bool: A boolean indicating whether to continue or not.
         """
-        if self.collect_outputs:
+        if self._collect_results:
+            self._results.append(result)
             self._outputs.append(result.output)
 
         if not result.succeeded and self.operator == "&&":
@@ -276,12 +262,8 @@ class SequentialCommand(Command):
 
         return True
 
-    def _final_result(self, result: CommandResult) -> CommandResult:
+    def _create_final_result(self, result: CommandResult) -> CommandResult:
         """Returns the final result of the sequence.
-
-        If operator is `&&` or `||`, the final result is the result of the last
-        command. If the operator is None, the final result is successed if all
-        commands in the sequence executed regardless of their result.
 
         Args:
             result: The result of the last command in the sequence.
@@ -289,101 +271,81 @@ class SequentialCommand(Command):
         Returns:
             CommandResult: The final result of the sequence.
         """
-        # If not collecting, the outputs is the output of the last command.
-        if not self.collect_outputs:
-            self._outputs = [result.output]
+        last_error = result.error
+        last_error_message = result.error_message
+        succeeded = result.succeeded
+        output = self._outputs
 
-        if self.operator:
-            succeeded = result.succeeded
-        else:
+        if not self.operator:
+            # For None(;) operator, the final result is always succeeded.
             succeeded = True
 
-        return CommandResult(output=self._outputs, succeeded=succeeded)
+        return CommandResult(
+            output=output,
+            succeeded=succeeded,
+            results=self._results,
+            error=last_error,
+            error_message=last_error_message,
+        )
 
-    def _run(self) -> CommandResult:
+    def run(self, input_data: Optional[Any] = None) -> CommandResult:
         for command in self.commands:
-            result = command.run()
-            if not self._evaluate_result(result):
+            result = run_command(command, input_data=input_data)
+            if not self._evaluate_execution(result):
                 break
 
-        return self._final_result(result)
+        return self._create_final_result(result)
 
-    async def _async_run(self) -> CommandResult:
+    async def async_run(
+        self, input_data: Optional[Any] = None
+    ) -> CommandResult:
         for command in self.commands:
-            result = await command.async_run()
-            if not self._evaluate_result(result):
+            result = await async_run_command(command, input_data=input_data)
+            if not self._evaluate_execution(result):
                 break
 
-        return self._final_result(result)
+        return self._create_final_result(result)
 
 
-def _execute_command(command: Command) -> CommandResult:
-    """Function to execute a given command.
-
-    The main purpose of this function is to be used with the `multiprocessing`
-    module to run commands in parallel. The `multiprocessing.Pool` requires
-    that the function to be executed is picklable. In order to reduce the
-    complexity of the `Command` classes, this function is used to execute the
-    command instead of calling the `run` method directly.
-
-    Args:
-        command: A Command object to execute.
-
-    Returns:
-        CommandResult: The result after executing the command.
-    """
-    return command.run()
-
-
-class ParallelCommand(Command):
+class MultiProcessCommand(Command):
     """This is a Macro Command which runs the commands in parallel using
     multiprocessing.
 
     The commands are indepndent of each other and can be run in parallel. This
     class uses the `multiprocessing.Pool` to run the commands in parallel.
 
+    This class always collects the outputs of all commands' execution.
+
     Attributes:
         commands: A list of Command objects to be executed in parallel.
-        number_of_processes: The number of processes to be used to run the
-            commands. Defaults to the number of CPUs available on the system.
-        collect_outputs: A boolean indicating whether to collect the outputs
-            of all commands. Defaults to True.
+        pool_size: The number of concurrent processes to run the commands.
+            Defaults to the number of CPUs available on the system.
     """
 
     def __init__(
         self,
         commands: List[Command],
-        number_of_processes: int = None,
-        collect_outputs=False,
+        pool_size: int = None,
     ):
-        super().__init__()
         if commands is None:
             raise ValueError("Commands list cannot be None")
 
         self.commands = commands
-        self.collect_outputs = collect_outputs
-        self.pool_size = number_of_processes or cpu_count()
+        self._pool_size = pool_size or cpu_count()
+        self._results = []
 
-    def _run(self) -> CommandResult:
-        outputs = None
+    def run(self, input_data: Optional[Any] = None) -> CommandResult:
+        if input_data:
+            raise ValueError("ParallelCommand does not support input data.")
 
-        with Pool(self.pool_size) as pool:
-            results = pool.map(_execute_command, self.commands)
+        with Pool(self._pool_size) as pool:
+            self._results = pool.map(run_command, self.commands)
 
-        # Update each command's result attribute with the returned results.
-        # This is because using multiprocessing, each command is run in a
-        # separate process. Each process has its own memory space. Thus, any
-        # change to the command object inside the child process (like setting
-        # the result attribute) will not be reflected in the command object of
-        # the parent process.
-        for i, command in enumerate(self.commands):
-            command.result = results[i]
+        outputs = [result.output for result in self._results if result]
 
-        # If collect_outputs is True, gather outputs of all results.
-        if self.collect_outputs:
-            outputs = [result.output for result in results if result]
+        return CommandResult(output=outputs, results=self._results)
 
-        return CommandResult(output=outputs)
-
-    async def _async_run(self) -> CommandResult:
+    async def async_run(
+        self, input_data: Optional[Any] = None
+    ) -> CommandResult:
         raise TypeError("ParallelCommand does not support async run")
