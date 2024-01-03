@@ -38,13 +38,18 @@
       "args": [
         "--vscode-launch", // Custom flag to indicate that we are launching from VSCode
         // "--log-cli-level=INFO",
+        "-v",
         "-s",
-        // "-k",
-        // "tests/test_os"
+        // "tests/test_os",
+        // "tests/test_os/test_core.py"
         // "tests/test_os/test_shell.py"
-        "tests/test_commands.py"
+        // "tests/test_commands.py::test_aync_concurrent_semaphore",
+        "tests/test_commands.py",
         // "tests/test_text"
         // "tests/test_datastores"
+        // "-k",
+        // "test_pipe_async"
+        // "test_sequential_async"
       ],
       "console": "integratedTerminal",
     }

@@ -1,8 +1,11 @@
 from __future__ import annotations
-from typing import Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, List, Optional, Union
 from multiprocessing import Pool, cpu_count
+from functools import partial
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import asyncio
 
 
 @dataclass
@@ -14,24 +17,25 @@ class CommandResult:
         succeeded: A boolean indicating whether the command was successful.
         error: The exception raised by the command if it failed.
         error_message: The error message if the command failed.
-        metadata: Any additional data.
         results: List of sub-commands results if applicable.
+        cancelled: A boolean indicating whether the command was cancelled. In
+            case of a concurrent command, it indicates whether the task was
+            cancelled or not.
+        metadata: Any additional data.
     """
 
     output: Any = None
     succeeded: bool = True
     error: Any = None
     error_message: str = None
-    metadata: Any = None
     results: List[CommandResult] = field(default_factory=list)
+    cancelled: bool = False
+    metadata: Any = None
 
 
 class Command(ABC):
-    """An abstract class for any executable command.
-
-    Provides a simple common interface for all classes which implement
-    the `Command` pattern. It provides a `run` for synchronous execution and
-    an `async_run` for asynchronous execution.
+    """An abstract class for any executable command.It provides a simple
+    interface for all classes which implement the `Command` pattern.
     """
 
     @abstractmethod
@@ -44,6 +48,12 @@ class Command(ABC):
         Returns:
             CommandResult: The result of executing the command.
         """
+
+
+class AsyncCommand(ABC):
+    """An abstract class for any executable asynchronous command. It provides a
+    simple interface for all classes which implement the `Command` pattern.
+    """
 
     @abstractmethod
     async def async_run(
@@ -83,7 +93,7 @@ def run_command(
 
 
 async def async_run_command(
-    command: Command, input_data: Optional[Any] = None
+    command: AsyncCommand, input_data: Optional[Any] = None
 ) -> CommandResult:
     """Runs a command asynchronously and returns the result.
 
@@ -104,7 +114,7 @@ async def async_run_command(
         )
 
 
-class PipeCommand(Command):
+class PipeCommand(Command, AsyncCommand):
     """This is a Macro Command which runs the commands in sequence, similar to
     `Pipe` in Unix-like operating systems.
     The output of each command is provided as input to the next
@@ -118,13 +128,12 @@ class PipeCommand(Command):
 
     def __init__(
         self,
-        commands: List[Command],
+        commands: List[Union[Command, AsyncCommand]],
         collect_results=True,
     ):
         if not commands:
             raise ValueError("Commands list cannot be None or empty")
         self.commands = commands
-        self._pipeline_failed = False
         self._last_result = None
         self._collect_results = collect_results
         self._results = []
@@ -144,11 +153,7 @@ class PipeCommand(Command):
         if self._collect_results:
             self._results.append(result)
 
-        if not result.succeeded:
-            self._pipeline_failed = True
-            return False
-
-        return True
+        return result.succeeded
 
     def _create_final_result(self, result: CommandResult) -> CommandResult:
         """Returns the final result of the pipeline. It returns the details of
@@ -160,17 +165,13 @@ class PipeCommand(Command):
         Returns:
             CommandResult: The final result of the pipeline.
         """
-        last_error = result.error
-        last_error_message = result.error_message
-        succeeded = result.succeeded
-        output = result.output
 
         return CommandResult(
-            output=output,
-            succeeded=succeeded,
+            output=result.output,
+            succeeded=result.succeeded,
             results=self._results,
-            error=last_error,
-            error_message=last_error_message,
+            error=result.error,
+            error_message=result.error_message,
         )
 
     def run(self, input_data: Optional[Any] = None) -> CommandResult:
@@ -198,7 +199,7 @@ class PipeCommand(Command):
         return self._create_final_result(result)
 
 
-class SequentialCommand(Command):
+class SequentialCommand(Command, AsyncCommand):
     """This is a Macro Command which runs the commands sequentially with an
     option to set the operator between the commands.
 
@@ -209,14 +210,14 @@ class SequentialCommand(Command):
 
     Attributes:
         commands: A list of Command objects to be executed in sequence.
-        operator: The operator between the commands. Defaults to `&&`.
-            - If the operator is `&&` (default), then the next command will
-            run only if the previous command was successful.
-            - If the operator is `||`, then the next command will run only if
-            the previous command failed.
-            - If the operator is None, it will act like the `;` operator,
-            meaning the next command will run regardless of the outcome of the
-            previous command.
+        operator: The operator between the commands which can be one of the
+            following:
+            - `&&`: (default), the next command will run only if the previous
+            command was successful.
+            - `||`: the next command will run only if the previous command
+            failed.
+            - None: It will act like the `;` operator, meaning the next command
+            will run regardless of the outcome of the previous command.
         collect_outputs: A boolean indicating whether to collect the outputs
             of all commands. Defaults to False.
             If collect_outputs is True, it gathers outputs of all results.
@@ -225,12 +226,13 @@ class SequentialCommand(Command):
 
     def __init__(
         self,
-        commands: List[Command],
+        commands: List[Union[Command, AsyncCommand]],
         operator="&&",
         collect_results=True,
     ):
         if not commands:
             raise ValueError("Commands list cannot be None or empty")
+
         if operator not in ["&&", "||", None]:
             raise ValueError("Invalid operator")
 
@@ -238,7 +240,6 @@ class SequentialCommand(Command):
         self.operator = operator
         self._collect_results = collect_results
         self._results = []
-        self._outputs = []
 
     def _evaluate_execution(self, result: CommandResult) -> bool:
         """Evaluates the result of a command and returns a boolean indicating
@@ -252,7 +253,6 @@ class SequentialCommand(Command):
         """
         if self._collect_results:
             self._results.append(result)
-            self._outputs.append(result.output)
 
         if not result.succeeded and self.operator == "&&":
             return False
@@ -274,7 +274,7 @@ class SequentialCommand(Command):
         last_error = result.error
         last_error_message = result.error_message
         succeeded = result.succeeded
-        output = self._outputs
+        output = [result.output for result in self._results if result]
 
         if not self.operator:
             # For None(;) operator, the final result is always succeeded.
@@ -327,25 +327,200 @@ class MultiProcessCommand(Command):
         commands: List[Command],
         pool_size: int = None,
     ):
-        if commands is None:
-            raise ValueError("Commands list cannot be None")
-
         self.commands = commands
         self._pool_size = pool_size or cpu_count()
-        self._results = []
 
     def run(self, input_data: Optional[Any] = None) -> CommandResult:
-        if input_data:
-            raise ValueError("ParallelCommand does not support input data.")
+        # Create a new function with input_data pre-filled
+        run_command_with_input = partial(run_command, input_data=input_data)
 
         with Pool(self._pool_size) as pool:
-            self._results = pool.map(run_command, self.commands)
+            results = pool.map(run_command_with_input, self.commands)
 
-        outputs = [result.output for result in self._results if result]
+        outputs = [result.output for result in results if result]
 
-        return CommandResult(output=outputs, results=self._results)
+        return CommandResult(output=outputs, results=results)
+
+
+class AsyncAdapterCommand(AsyncCommand):
+    """This is an Adapter command which converts the interface of a command
+    from synchronous to asynchronous.
+
+    Attributes:
+        command: A synchronous Command object to be converted to an
+            asynchronous command.
+    """
+
+    def __init__(self, command: Command):
+        self.command = command
 
     async def async_run(
         self, input_data: Optional[Any] = None
     ) -> CommandResult:
-        raise TypeError("ParallelCommand does not support async run")
+        return await asyncio.to_thread(run_command, self.command, input_data)
+
+
+class SyncAdapterCommand(Command):
+    """This is an Adapter command which converts the interface of a command
+    from asynchronous to synchronous.
+
+    Attributes:
+        command: An asynchronous Command object to be converted to an
+            synchronous command.
+
+    """
+
+    def __init__(self, command: Command):
+        self.command = command
+
+    def run(self, input_data: Optional[Any] = None) -> CommandResult:
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(
+                lambda: asyncio.run(
+                    async_run_command(
+                        command=self.command, input_data=input_data
+                    )
+                )
+            )
+            return future.result()
+
+
+class AsyncConcurrentCommand(AsyncCommand):
+    """This is a Macro Command which runs the asynchronous commands
+    concurrently and wait for all commands to finish before returning the
+    result.
+
+    The commands are indepndent of each other and can be run in parallel. This
+    class uses the `asyncio` to run the commands in parallel and wait for all
+    completion (or cancellation of all running tasks).
+
+    This class always collects the outputs of all commands' execution. the
+    `results` attribute contains the results of all commands regardless of
+    their success or failure. If stopping at failure, the result for the
+    cancelled tasks will be set to None.
+
+    Attributes:
+        commands: A list of Command objects to be executed in asynchronously.
+        concurrency_limit: The number of concurrent executions.
+            This will help limit the number of concurrent tasks to avoid
+            overloading the underlying system.
+            Defaults to 0, which means no limit.
+        callback: A callback function to be called after each command execution.
+            The callback function should accept three arguments:
+                - command: The command that was executed.
+                - input_data: The input data that was passed to the command.
+                - result: The result of the command execution.
+
+    """
+
+    def __init__(
+        self,
+        commands: List[AsyncCommand],
+        concurrency_limit: int = 0,
+        callback=None,
+        stop_at_failure: bool = False,
+    ):
+        self.commands = commands
+        self._concurrency_limit = concurrency_limit
+        self._callback = callback
+        self._stop_at_failure = stop_at_failure
+
+    async def _async_run_task(
+        self,
+        command: Command,
+        input_data: Optional[Any],
+        semaphore: asyncio.Semaphore = None,
+        callback=None,
+    ) -> CommandResult:
+        try:
+            if semaphore:
+                async with semaphore:
+                    result = await async_run_command(
+                        command=command, input_data=input_data
+                    )
+            else:
+                result = await async_run_command(
+                    command=command, input_data=input_data
+                )
+        except Exception as ex:
+            result = CommandResult(
+                output=None,
+                succeeded=False,
+                error=ex,
+                error_message=str(ex),
+            )
+
+        if callback:
+            callback(command=command, input_data=input_data, result=result)
+
+        return result, command
+
+    async def async_run(
+        self, input_data: Optional[Any] = None
+    ) -> CommandResult:
+        if self._concurrency_limit > 0:
+            semaphore = asyncio.Semaphore(self._concurrency_limit)
+        else:
+            semaphore = None
+
+        tasks = [
+            asyncio.create_task(
+                self._async_run_task(
+                    command=command,
+                    input_data=input_data,
+                    semaphore=semaphore,
+                    callback=self._callback,
+                )
+            )
+            for command in self.commands
+        ]
+
+        # Initialize a list to store the results in order
+        results = [None] * len(self.commands)
+        error = None
+
+        try:
+            for task in asyncio.as_completed(tasks):
+                result, command = await task
+
+                # Find the index of the command and store the result at that
+                # index in the results list
+                index = self.commands.index(command)
+                results[index] = result
+
+                if not result.succeeded and self._stop_at_failure:
+                    raise RuntimeError(
+                        (
+                            f"Task failed with error {result.error_message}. "
+                            "Cancelling all running tasks."
+                        )
+                    )
+        except Exception as ex:
+            error = ex
+            # Cancel all running tasks
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+        # Wait for all tasks to be cancelled or completed
+        await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
+
+        # Create the final result. If the task was cancelled, the result will be
+        # set to a failed result with cancelled=True
+        final_results = []
+        for res in results:
+            if not res:
+                final_result = CommandResult(succeeded=False, cancelled=True)
+            else:
+                final_result = res
+            final_results.append(final_result)
+
+        outputs = [res.output for res in final_results]
+
+        return CommandResult(
+            output=outputs,
+            results=final_results,
+            succeeded=not error,
+            error=error,
+            error_message=str(error) if error else None,
+        )
