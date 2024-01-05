@@ -9,6 +9,7 @@ from pybackpack.commands import (
 
 # pylint: disable=redefined-outer-name
 
+
 def test_shell_command():
     cmd = ProcessCommand(["echo", "Hello"])
     res = cmd.run()
@@ -20,12 +21,12 @@ def test_shell_command():
     res = run_command(cmd)
     assert "MY_VAR=test1" in res.output
 
-    # Test long running command
+    # Test timeout
     cmd = ProcessCommand(["sleep", "2"], timeout=1)
     res = run_command(cmd)
     assert res.output is None
     assert res.succeeded is False
-    assert res.metadata["timeout"] is True
+    assert res.metadata["failure_reason"] == "timeout"
 
     # Test failed command
     cmd = ProcessCommand(["ls", "unknown"])
@@ -47,7 +48,7 @@ def test_shell_command():
     assert res.output is None
     assert res.succeeded is False
     assert res.error.errno == 2
-    assert res.metadata["command_not_found"] is True
+    assert res.metadata["failure_reason"] == "command_not_found"
     assert "No such file or directory" in res.error.strerror
     assert "No such file or directory" in res.error_message
 
@@ -188,9 +189,6 @@ def test_run_shel_command():
 
     # Test failure
     cmd = ["ls", "unknown"]
-    try:
+    with pytest.raises(Exception) as ex_info:
         run_shell_command(cmd)
-        assert False
-    except Exception as ex:
-        # pylint: disable=no-member
-        assert "No such file or directory" in str(ex.stderr)
+    assert "No such file or directory" in str(ex_info.value.stderr)

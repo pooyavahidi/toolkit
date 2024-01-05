@@ -327,6 +327,9 @@ class MultiProcessCommand(Command):
         commands: List[Command],
         pool_size: int = None,
     ):
+        if not commands:
+            raise ValueError("Commands list cannot be None or empty")
+
         self.commands = commands
         self._pool_size = pool_size or cpu_count()
 
@@ -351,7 +354,7 @@ class AsyncAdapterCommand(AsyncCommand):
             asynchronous command.
     """
 
-    def __init__(self, command: Command):
+    def __init__(self, command: AsyncCommand):
         self.command = command
 
     async def async_run(
@@ -396,7 +399,7 @@ class AsyncConcurrentCommand(AsyncCommand):
 
     This class always collects the outputs of all commands' execution. the
     `results` attribute contains the results of all commands regardless of
-    their success or failure. If stopping at failure, the result for the
+    their success or failure. In case of cancellation, the result for the
     cancelled tasks will be set to None.
 
     Attributes:
@@ -410,6 +413,9 @@ class AsyncConcurrentCommand(AsyncCommand):
                 - command: The command that was executed.
                 - input_data: The input data that was passed to the command.
                 - result: The result of the command execution.
+            The callback function should not return anything.
+        cancel_on_failure: A boolean indicating whether to cancel all running
+            tasks by the first encountered failure. Defaults to False.
 
     """
 
@@ -418,19 +424,19 @@ class AsyncConcurrentCommand(AsyncCommand):
         commands: List[AsyncCommand],
         concurrency_limit: int = 0,
         callback=None,
-        stop_at_failure: bool = False,
+        cancel_on_failure: bool = False,
     ):
         self.commands = commands
         self._concurrency_limit = concurrency_limit
         self._callback = callback
-        self._stop_at_failure = stop_at_failure
+        self._cancel_on_failure = cancel_on_failure
 
     async def _async_run_task(
         self,
         command: Command,
-        input_data: Optional[Any],
-        semaphore: asyncio.Semaphore = None,
-        callback=None,
+        input_data: Any,
+        semaphore: asyncio.Semaphore,
+        callback,
     ) -> CommandResult:
         try:
             if semaphore:
@@ -488,7 +494,7 @@ class AsyncConcurrentCommand(AsyncCommand):
                 index = self.commands.index(command)
                 results[index] = result
 
-                if not result.succeeded and self._stop_at_failure:
+                if not result.succeeded and self._cancel_on_failure:
                     raise RuntimeError(
                         (
                             f"Task failed with error {result.error_message}. "

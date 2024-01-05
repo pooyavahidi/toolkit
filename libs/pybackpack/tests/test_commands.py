@@ -912,7 +912,7 @@ async def test_async_concurrent_stop_at_failure():
     assert res.succeeded is True
     assert res.output == ["A", "B", "C", "D", None, "Z"]
 
-    ac_cmd = AsyncConcurrentCommand(cmds, stop_at_failure=True)
+    ac_cmd = AsyncConcurrentCommand(cmds, cancel_on_failure=True)
     res = await async_run_command(ac_cmd)
     assert res.succeeded is False
     assert len(res.results) == 6

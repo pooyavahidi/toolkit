@@ -89,9 +89,9 @@ class ProcessCommand(Command):
 
         except Exception as ex:
             if isinstance(ex, subprocess.TimeoutExpired):
-                metadata["timeout"] = True
+                metadata["failure_reason"] = "timeout"
             if isinstance(ex, FileNotFoundError):
-                metadata["command_not_found"] = True
+                metadata["failure_reason"] = "command_not_found"
 
             cmd_result = CommandResult(
                 output=None,
