@@ -3,9 +3,7 @@ import sys
 import os
 import argparse
 
-sys.path.append(
-    os.path.join(os.path.dirname(__file__), "../../libs/pybackpack")
-)
+sys.path.append(os.environ.get("PYBACKPACK_DIR", ""))
 
 from pybackpack.cryptography.secrets import SecretGenerator
 
